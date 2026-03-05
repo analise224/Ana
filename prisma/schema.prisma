@@ -1,0 +1,137 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  ADMIN
+  MANAGER
+  ANALYST
+  AGENT
+}
+
+enum DisputeStatus {
+  OPEN
+  UPHELD
+  REJECTED
+}
+
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  password  String
+  role      Role     @default(AGENT)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  agent     Agent?
+  reviews   Review[] @relation("ReviewerReviews")
+}
+
+model Agent {
+  id         String     @id @default(cuid())
+  name       String
+  team       String
+  department String
+  active     Boolean    @default(true)
+  userId     String?    @unique
+  user       User?      @relation(fields: [userId], references: [id])
+  reviews    Review[]
+  errorLogs  ErrorLog[]
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+}
+
+model Review {
+  id            String           @id @default(cuid())
+  department    String
+  channel       String
+  caseRef       String
+  agentId       String
+  reviewerId    String
+  reviewDate    DateTime
+  monthKey      String
+  scorecardType String
+  totalScore    Float
+  maxScore      Float
+  scorePercent  Float
+  cbFlag        Boolean          @default(false)
+  sbFlag        Boolean          @default(false)
+  summaryNotes  String?
+  agentAcked    Boolean          @default(false)
+  agentAckedAt  DateTime?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  agent         Agent            @relation(fields: [agentId], references: [id])
+  reviewer      User             @relation("ReviewerReviews", fields: [reviewerId], references: [id])
+  subScores     ReviewSubScore[]
+  errorLogs     ErrorLog[]
+  dispute       Dispute?
+}
+
+model ReviewSubScore {
+  id              String @id @default(cuid())
+  reviewId        String
+  sectionName     String
+  subcategoryName String
+  score           Float
+  maxScore        Float
+  review          Review @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+}
+
+model ErrorLog {
+  id          String   @id @default(cuid())
+  reviewId    String
+  agentId     String
+  department  String
+  channel     String
+  monthKey    String
+  category    String
+  subcategory String
+  count       Int      @default(1)
+  logDate     DateTime @default(now())
+  review      Review   @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  agent       Agent    @relation(fields: [agentId], references: [id])
+}
+
+model ScorecardDefinition {
+  id         String   @id @default(cuid())
+  name       String
+  type       String   @unique
+  version    Int      @default(1)
+  active     Boolean  @default(true)
+  jsonSchema Json
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model ErrorTaxonomy {
+  id          String  @id @default(cuid())
+  channel     String
+  category    String
+  subcategory String
+  active      Boolean @default(true)
+  sortOrder   Int     @default(0)
+}
+
+model Dispute {
+  id            String        @id @default(cuid())
+  reviewId      String        @unique
+  agentName     String
+  reason        String
+  notes         String?
+  status        DisputeStatus @default(OPEN)
+  adminResponse String?
+  resolvedAt    DateTime?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  review        Review        @relation(fields: [reviewId], references: [id])
+}

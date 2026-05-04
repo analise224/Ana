@@ -1,6 +1,6 @@
 // This Pine Script® code is subject to the Mozilla Public License 2.0
 // © AMID Indicator — Accumulation · Manipulation · IFVG · Distribution
-//@version=5
+//@version=6
 indicator("Accumulation · Manipulation · IFVG · Distribution",
           shorttitle       = "AMID",
           overlay          = true,
@@ -251,15 +251,23 @@ plotshape(short_signal and show_sig, "Short", shape.triangledown, location.above
 var label phase_lbl = na
 label.delete(phase_lbl)
 
-p_txt = in_acc          ? "ACCUMULATION"              :
-        bull_sweep      ? "BULL MANIPULATION"          :
-        bear_sweep      ? "BEAR MANIPULATION"          :
-        recent_manip and manip_dir ==  1 ? "DISTRIBUTION (Bull)" :
-        recent_manip and manip_dir == -1 ? "DISTRIBUTION (Bear)" : "SCANNING"
-
-p_col = in_acc                                          ? #FFC107 :
-        bull_sweep or (recent_manip and manip_dir ==  1) ? c_long  :
-        bear_sweep or (recent_manip and manip_dir == -1) ? c_short : color.gray
+string p_txt = "SCANNING"
+color  p_col = color.gray
+if in_acc
+    p_txt := "ACCUMULATION"
+    p_col := #FFC107
+else if bull_sweep
+    p_txt := "BULL MANIPULATION"
+    p_col := c_long
+else if bear_sweep
+    p_txt := "BEAR MANIPULATION"
+    p_col := c_short
+else if recent_manip and manip_dir == 1
+    p_txt := "DISTRIBUTION (Bull)"
+    p_col := c_long
+else if recent_manip and manip_dir == -1
+    p_txt := "DISTRIBUTION (Bear)"
+    p_col := c_short
 
 phase_lbl := label.new(bar_index + 3, high + atr * 2, p_txt, color=color.new(p_col, 10), textcolor=color.white, style=label.style_label_left, size=size.small)
 

@@ -1,156 +1,176 @@
 // This Pine Script® code is subject to the Mozilla Public License 2.0
-// © AMID Indicator — Accumulation · Manipulation · IFVG · Distribution
+// © AMID — Accumulation · Manipulation · IFVG · Distribution  (v2 — Clean Layout)
 //@version=6
-indicator("Accumulation · Manipulation · IFVG · Distribution",
-          shorttitle       = "AMID",
-          overlay          = true,
-          max_boxes_count  = 200,
-          max_lines_count  = 200,
-          max_labels_count = 200)
+indicator("AMID — Accumulation · Manipulation · IFVG · Distribution",
+          shorttitle="AMID", overlay=true,
+          max_boxes_count=100, max_lines_count=100, max_labels_count=100)
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  SETTINGS
+// ─────────────────────────────────────────────────────────────────────────────
+var G1 = "Accumulation"
+acc_len     = input.int  (20,   "Lookback Bars",   minval=5,    group=G1)
+acc_atr_mul = input.float(2.0,  "ATR Threshold",   minval=0.5,  step=0.1, group=G1,
+              tooltip="Range must be ≤ ATR × this value. Lower = tighter squeeze needed.")
+acc_minbars = input.int  (8,    "Min Bars",        minval=3,    group=G1)
+
+var G2 = "Manipulation"
+sw_atr       = input.float(0.3, "Sweep (ATR)",     minval=0.1,  step=0.1, group=G2,
+              tooltip="Wick must pierce beyond the range edge by this × ATR.")
+manip_expiry = input.int  (60,  "Window (bars)",   minval=10,   group=G2,
+              tooltip="Bars after manipulation that IFVG signals remain valid.")
+
+var G3 = "IFVG"
+fvg_min_atr = input.float(0.15, "Min Size (ATR)",  minval=0.05, step=0.05, group=G3)
+fvg_width   = input.int  (10,   "Box Width (bars)", minval=3,   group=G3,
+              tooltip="Fixed width of each IFVG box in bars.")
+fvg_max_age = input.int  (60,   "Max Age (bars)",  minval=10,   group=G3)
+
+var G4 = "Signals"
+show_sig = input.bool (true, "Show Entry Labels",  group=G4)
+tp_mult  = input.float(2.5,  "TP (ATR mult)",      minval=0.5, step=0.5, group=G4)
+sl_mult  = input.float(1.0,  "SL (ATR mult)",      minval=0.1, step=0.1, group=G4)
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  PALETTE  (fixed, no user inputs — keeps settings panel short)
+// ─────────────────────────────────────────────────────────────────────────────
+C_ACC_BG   = color.new(#FFFDE7, 55)   // light yellow fill
+C_ACC_BRD  = color.new(#FFC107,  0)   // amber border
+C_MANIP    = #FF6D00                  // orange
+C_BULL_FVG = color.new(#00C853, 65)   // green
+C_BEAR_FVG = color.new(#FF1744, 70)   // red
+C_BULL_BRD = color.new(#00C853, 20)
+C_BEAR_BRD = color.new(#FF1744, 20)
+C_LONG     = #00C853
+C_SHORT    = #FF1744
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  USER DEFINED TYPE
 // ─────────────────────────────────────────────────────────────────────────────
 type FVG
-    float top      // upper price boundary of the gap
-    float bot      // lower price boundary of the gap
-    int   dir      // 1 = bullish gap, -1 = bearish gap
-    int   born     // bar_index when created
-    bool  filled   // true once price enters the zone
-    bool  acted    // true once an IFVG signal has fired from this zone
-    box   bx       // visual box object
+    float top
+    float bot
+    int   dir    //  1 = bullish gap,  -1 = bearish gap
+    int   born
+    bool  filled
+    bool  acted
+    box   bx
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  SETTINGS
-// ─────────────────────────────────────────────────────────────────────────────
-
-// Accumulation
-var G1 = "─── Accumulation ───"
-acc_len     = input.int  (20,    "Lookback Bars",              minval = 5,    group = G1)
-acc_atr_mul = input.float(2.0,   "Range / ATR Threshold",      minval = 0.5,  step  = 0.1,  group = G1,
-              tooltip = "Price range must be ≤ ATR × threshold. Lower = tighter range required.")
-acc_minbars = input.int  (8,     "Min Bars in Consolidation",  minval = 3,    group = G1)
-show_acc    = input.bool (true,  "Show Accumulation Zone",     group = G1)
-
-// Manipulation
-var G2 = "─── Manipulation ───"
-sw_atr      = input.float(0.3,   "Sweep Distance (ATR mult)",  minval = 0.1,  step  = 0.1,  group = G2,
-              tooltip = "Price must wick beyond the range edge by this multiple of ATR.")
-manip_expiry = input.int (60,    "Manipulation Window (bars)", minval = 10,   group = G2,
-              tooltip = "How many bars after manipulation an IFVG signal is still valid.")
-show_manip  = input.bool (true,  "Show Manipulation Labels",   group = G2)
-
-// IFVG
-var G3 = "─── IFVG (Inverse Fair Value Gap) ───"
-fvg_min_atr  = input.float(0.2,  "Min FVG Size (ATR mult)",    minval = 0.05, step  = 0.05, group = G3)
-fvg_extend   = input.int  (50,   "Extend Box (bars)",           minval = 5,    group = G3)
-fvg_max_age  = input.int  (80,   "Max FVG Age (bars)",          minval = 10,   group = G3)
-show_fvg     = input.bool (true, "Show FVG Boxes",              group = G3)
-show_ifvg_lbl= input.bool (true, "Show IFVG Label on Fill",     group = G3)
-
-// Signals & Risk
-var G4 = "─── Signals & Risk ───"
-show_sig    = input.bool (true,  "Show Entry Signals",          group = G4)
-tp_mult     = input.float(2.5,   "Take Profit (ATR mult)",      minval = 0.5,  step  = 0.5,  group = G4)
-sl_mult     = input.float(1.0,   "Stop Loss  (ATR mult)",       minval = 0.1,  step  = 0.1,  group = G4)
-
-// Colors
-var G5 = "─── Colors ───"
-c_acc_fill  = input.color(color.new(#FFC107, 88), "Accumulation Fill",   group = G5)
-c_bull_fvg  = input.color(color.new(#00BCD4, 75), "Bullish FVG",         group = G5)
-c_bear_fvg  = input.color(color.new(#F44336, 75), "Bearish FVG",         group = G5)
-c_ifvg_bull = input.color(color.new(#00BCD4, 40), "Bull IFVG (filled)",  group = G5)
-c_ifvg_bear = input.color(color.new(#F44336, 40), "Bear IFVG (filled)",  group = G5)
-c_long      = input.color(#00E676,                "Long Signal",          group = G5)
-c_short     = input.color(#FF1744,                "Short Signal",         group = G5)
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  CORE LOGIC
+//  PHASE 1 — ACCUMULATION
+//  Draw one clean yellow dashed box around the consolidation zone.
+//  The box is created once, updated each bar, and frozen when price breaks out.
 // ─────────────────────────────────────────────────────────────────────────────
 atr = ta.atr(14)
 
-// ── PHASE 1 — ACCUMULATION ───────────────────────────────────────────────────
-// Detect when price is compressing into a tight range relative to ATR.
+h_rng   = ta.highest(high, acc_len)
+l_rng   = ta.lowest (low,  acc_len)
+ranging = (h_rng - l_rng) <= atr * acc_atr_mul
 
-h20 = ta.highest(high, acc_len)
-l20 = ta.lowest (low,  acc_len)
-
-var int   cons_count = 0
-var float cons_hi    = na
-var float cons_lo    = na
-var bool  in_acc     = false
-
-ranging = (h20 - l20) <= atr * acc_atr_mul
+var int   cons_cnt = 0
+var float cons_hi  = na
+var float cons_lo  = na
+var bool  in_acc   = false
+var int   acc_s    = 0    // bar_index where current consolidation started
 
 if ranging
-    cons_count += 1
-    cons_hi    := h20
-    cons_lo    := l20
-    in_acc     := cons_count >= acc_minbars
+    if cons_cnt == 0
+        acc_s    := bar_index
+    cons_cnt += 1
+    cons_hi  := h_rng
+    cons_lo  := l_rng
+    in_acc   := cons_cnt >= acc_minbars
 else
-    cons_count := 0
-    in_acc     := false
+    cons_cnt := 0
+    in_acc   := false
 
-// Snapshot the high/low of the last confirmed accumulation zone on breakout.
-var float zone_hi = na
-var float zone_lo = na
+var box   acc_box = na
+var float zone_hi = na   // snapshot of last accumulation high
+var float zone_lo = na   // snapshot of last accumulation low
 
+// When consolidation ends: freeze the box and save the zone
 if in_acc[1] and not in_acc
+    if not na(acc_box)
+        box.set_right(acc_box, bar_index - 1)
+    acc_box := na
     zone_hi := cons_hi[1]
     zone_lo := cons_lo[1]
 
+// While consolidating: create or stretch the box
+if in_acc
+    if na(acc_box)
+        acc_box := box.new(acc_s, cons_hi, bar_index, cons_lo,
+                           border_color=C_ACC_BRD, bgcolor=C_ACC_BG,
+                           border_width=1, border_style=line.style_dashed)
+    else
+        box.set_left  (acc_box, acc_s)
+        box.set_right (acc_box, bar_index)
+        box.set_top   (acc_box, cons_hi)
+        box.set_bottom(acc_box, cons_lo)
+
 have_zone = not na(zone_hi)
 
-// ── PHASE 2 — MANIPULATION ───────────────────────────────────────────────────
-// A manipulation bar wicks beyond the accumulation zone edge and closes back
-// inside it, simulating a stop-hunt / liquidity sweep.
-
+// ─────────────────────────────────────────────────────────────────────────────
+//  PHASE 2 — MANIPULATION
+//  A candle wicks beyond the zone edge and closes back inside.
+//  Marked with: orange barcolor + dashed line at swept level + label.
+// ─────────────────────────────────────────────────────────────────────────────
 bull_sweep = have_zone and low  < zone_lo - atr * sw_atr and close > zone_lo
 bear_sweep = have_zone and high > zone_hi + atr * sw_atr and close < zone_hi
 
-// Consume the zone after a sweep so it is one-shot per accumulation.
+// Consume zone — one manipulation per accumulation
 if bull_sweep or bear_sweep
     zone_hi := na
     zone_lo := na
 
-var int  manip_dir = 0   // 1 = bullish sweep (swept below), -1 = bearish sweep (swept above)
-var int  manip_bar = na  // bar_index of the last manipulation
+var int manip_dir = 0    //  1 = bull sweep (swept below),  -1 = bear sweep (swept above)
+var int manip_bar = na
 
 if bull_sweep
     manip_dir := 1
     manip_bar := bar_index
+    // Dashed orange line at the swept low level
+    line.new(bar_index - 3, low, bar_index + 30, low, color=C_MANIP, style=line.style_dashed, width=1)
+    label.new(bar_index, low - atr * 0.9, "MANIPULATION\nSweep Below ↓",
+              color=color.new(C_MANIP, 0), textcolor=color.white,
+              style=label.style_label_up, size=size.small)
 
 if bear_sweep
     manip_dir := -1
     manip_bar := bar_index
+    line.new(bar_index - 3, high, bar_index + 30, high, color=C_MANIP, style=line.style_dashed, width=1)
+    label.new(bar_index, high + atr * 0.9, "MANIPULATION\nSweep Above ↑",
+              color=color.new(C_MANIP, 0), textcolor=color.white,
+              style=label.style_label_down, size=size.small)
+
+// Color the manipulation candle orange
+barcolor(bull_sweep or bear_sweep ? color.new(C_MANIP, 20) : na, title="Manipulation Bar")
 
 recent_manip = not na(manip_bar) and bar_index - manip_bar <= manip_expiry
 
-// ── PHASE 3 — FAIR VALUE GAPS & IFVG ─────────────────────────────────────────
-// Standard 3-candle FVG:
-//   Bullish FVG : high[2] < low[0]  →  gap lives between high[2] and low[0]
-//   Bearish FVG : low[2]  > high[0] →  gap lives between high[0] and low[2]
-//
-// IFVG (Inverse FVG):
-//   When price returns into a previously created FVG, the zone "inverts" —
-//   a bearish FVG now acts as support (→ long), a bullish FVG as resistance (→ short).
-//   Requires a recent manipulation in the same directional bias for confluence.
-
-bull_fvg_raw = high[2] < low[0]  and (low[0]  - high[2]) >= atr * fvg_min_atr
-bear_fvg_raw = low[2]  > high[0] and (low[2]  - high[0]) >= atr * fvg_min_atr
+// ─────────────────────────────────────────────────────────────────────────────
+//  PHASE 3 — IFVG  (Inverse Fair Value Gap)
+//  FVGs are only registered during the manipulation window — no clutter outside
+//  the active setup.  Each box has a fixed width (no endless extension).
+//  When price fills a box it becomes an IFVG: text appears, fill darkens.
+// ─────────────────────────────────────────────────────────────────────────────
+bull_fvg = high[2] < low[0]  and (low[0]  - high[2]) >= atr * fvg_min_atr
+bear_fvg = low[2]  > high[0] and (low[2]  - high[0]) >= atr * fvg_min_atr
 
 var FVG[] fvgs = array.new<FVG>()
 
-// Register new FVGs
-if bull_fvg_raw and show_fvg
-    b = box.new(bar_index - 1, low[0], bar_index + fvg_extend, high[2], border_color=color.new(c_bull_fvg, 20), bgcolor=c_bull_fvg, border_width=1)
+// Only add FVGs while there is an active manipulation context
+if bull_fvg and recent_manip
+    b = box.new(bar_index - 2, low[0], bar_index + fvg_width, high[2],
+                border_color=C_BULL_BRD, bgcolor=C_BULL_FVG, border_width=1)
     array.push(fvgs, FVG.new(low[0], high[2], 1, bar_index, false, false, b))
 
-if bear_fvg_raw and show_fvg
-    b = box.new(bar_index - 1, low[2], bar_index + fvg_extend, high[0], border_color=color.new(c_bear_fvg, 20), bgcolor=c_bear_fvg, border_width=1)
+if bear_fvg and recent_manip
+    b = box.new(bar_index - 2, low[2], bar_index + fvg_width, high[0],
+                border_color=C_BEAR_BRD, bgcolor=C_BEAR_FVG, border_width=1)
     array.push(fvgs, FVG.new(low[2], high[0], -1, bar_index, false, false, b))
 
-// Process the FVG list: fill detection, IFVG signals, age pruning.
+// Process FVG array
 var bool long_signal  = false
 var bool short_signal = false
 long_signal  := false
@@ -161,93 +181,78 @@ if array.size(fvgs) > 0
     while i >= 0
         f = array.get(fvgs, i)
 
-        // Remove entries that have exceeded their maximum age.
+        // Age out old entries
         if bar_index - f.born > fvg_max_age
             box.delete(f.bx)
             array.remove(fvgs, i)
             i -= 1
             continue
 
-        // Detect first touch: price enters the FVG zone.
+        // First touch → zone is now an IFVG
         if not f.filled and high >= f.bot and low <= f.top
             f.filled := true
-
-            // Restyle box to indicate this zone is now an IFVG.
-            box.set_bgcolor(f.bx, f.dir == 1 ? c_ifvg_bull : c_ifvg_bear)
-            box.set_border_color(f.bx, f.dir == 1 ? color.new(c_ifvg_bull, 0) : color.new(c_ifvg_bear, 0))
+            // Darken fill, thicker border, stamp "IFVG" text inside the box
+            box.set_bgcolor     (f.bx, f.dir == 1 ? color.new(#00C853, 40) : color.new(#FF1744, 45))
             box.set_border_width(f.bx, 2)
+            box.set_text        (f.bx, "IFVG")
+            box.set_text_color  (f.bx, color.white)
+            box.set_text_size   (f.bx, size.tiny)
+            // Fix the right edge so filled boxes don't keep stretching
+            box.set_right(f.bx, f.born + fvg_width + 5)
 
-            // Generate entry signal when there is manipulation confluence.
+            // ── ENTRY SIGNAL ──────────────────────────────────────────────
             if recent_manip and not f.acted
-                // Bearish FVG filled after bull manipulation → LONG (acts as support)
+                // Bear FVG filled → support → LONG  (after bull manipulation)
                 if f.dir == -1 and manip_dir == 1 and close > f.bot
                     long_signal := true
                     f.acted     := true
-
-                // Bullish FVG filled after bear manipulation → SHORT (acts as resistance)
+                // Bull FVG filled → resistance → SHORT  (after bear manipulation)
                 if f.dir == 1 and manip_dir == -1 and close < f.top
                     short_signal := true
                     f.acted      := true
 
-            if show_ifvg_lbl
-                lbl_y = f.dir == 1 ? f.top + atr * 0.4 : f.bot - atr * 0.4
-                lbl_s = f.dir == 1 ? label.style_label_down : label.style_label_up
-                lbl_c = f.dir == 1 ? color.new(c_ifvg_bull, 5) : color.new(c_ifvg_bear, 5)
-                label.new(bar_index, lbl_y, "IFVG", color=lbl_c, textcolor=color.white, style=lbl_s, size=size.tiny)
-
-        // Keep unfilled FVG boxes extended; shrink filled ones.
-        if show_fvg
-            box.set_right(f.bx, f.filled ? bar_index + 5 : bar_index + fvg_extend)
+        // Keep unfilled boxes extended to current bar
+        if not f.filled
+            box.set_right(f.bx, bar_index + fvg_width)
 
         i -= 1
 
-// ── PHASE 4 — DISTRIBUTION & SIGNALS ────────────────────────────────────────
-// Distribution is the directional move that follows manipulation + IFVG entry.
-// The signals above mark the beginning of the distribution leg.
-// TP/SL levels are based on ATR multiples from the entry bar.
-
 // ─────────────────────────────────────────────────────────────────────────────
-//  VISUALS
+//  PHASE 4 — DISTRIBUTION  (entry labels + TP / SL lines)
 // ─────────────────────────────────────────────────────────────────────────────
-
-// Background highlight during accumulation
-bgcolor(in_acc and show_acc ? c_acc_fill : na, title = "Accumulation BG")
-
-// Color the manipulation bar
-barcolor(bull_sweep ? c_long : bear_sweep ? c_short : na, title = "Manipulation Bar")
-
-// Manipulation labels
-if bull_sweep and show_manip
-    label.new(bar_index, low - atr * 1.1, "BULL MANIP\nLiq. Sweep Below", color=color.new(#FF6D00, 10), textcolor=color.white, style=label.style_label_up, size=size.small)
-
-if bear_sweep and show_manip
-    label.new(bar_index, high + atr * 1.1, "BEAR MANIP\nLiq. Sweep Above", color=color.new(#FF6D00, 10), textcolor=color.white, style=label.style_label_down, size=size.small)
-
-// Entry signal labels + TP / SL dashed lines
 if show_sig
     if long_signal
-        entry = close
-        sl    = low  - atr * sl_mult
-        tp    = high + atr * tp_mult
-        txt   = "LONG\nEntry : " + str.tostring(entry, format.mintick) + "\nSL    : " + str.tostring(sl, format.mintick) + "\nTP    : " + str.tostring(tp, format.mintick)
-        label.new(bar_index, sl - atr * 0.6, txt, color=color.new(c_long, 5), textcolor=color.white, style=label.style_label_up, size=size.normal)
-        line.new(bar_index, tp, bar_index + 20, tp, color=color.new(c_long, 30), style=line.style_dashed, width=2)
-        line.new(bar_index, sl, bar_index + 20, sl, color=color.new(c_short, 30), style=line.style_dashed, width=2)
+        sl  = close - atr * sl_mult
+        tp  = close + atr * tp_mult
+        label.new(bar_index, low - atr * 1.6, "▲  LONG",
+                  color=color.new(C_LONG, 0), textcolor=color.white,
+                  style=label.style_label_up, size=size.large)
+        line.new(bar_index, tp, bar_index + 30, tp,
+                 color=color.new(C_LONG, 25), style=line.style_dashed, width=2)
+        line.new(bar_index, sl, bar_index + 30, sl,
+                 color=color.new(C_SHORT, 25), style=line.style_dashed, width=2)
+        label.new(bar_index + 30, tp, "TP", color=color.new(C_LONG,  10), textcolor=color.white, style=label.style_label_left, size=size.tiny)
+        label.new(bar_index + 30, sl, "SL", color=color.new(C_SHORT, 10), textcolor=color.white, style=label.style_label_left, size=size.tiny)
 
     if short_signal
-        entry = close
-        sl    = high + atr * sl_mult
-        tp    = low  - atr * tp_mult
-        txt   = "SHORT\nEntry : " + str.tostring(entry, format.mintick) + "\nSL    : " + str.tostring(sl, format.mintick) + "\nTP    : " + str.tostring(tp, format.mintick)
-        label.new(bar_index, sl + atr * 0.6, txt, color=color.new(c_short, 5), textcolor=color.white, style=label.style_label_down, size=size.normal)
-        line.new(bar_index, tp, bar_index + 20, tp, color=color.new(c_short, 30), style=line.style_dashed, width=2)
-        line.new(bar_index, sl, bar_index + 20, sl, color=color.new(c_long, 30), style=line.style_dashed, width=2)
+        sl  = close + atr * sl_mult
+        tp  = close - atr * tp_mult
+        label.new(bar_index, high + atr * 1.6, "▼  SHORT",
+                  color=color.new(C_SHORT, 0), textcolor=color.white,
+                  style=label.style_label_down, size=size.large)
+        line.new(bar_index, tp, bar_index + 30, tp,
+                 color=color.new(C_LONG, 25), style=line.style_dashed, width=2)
+        line.new(bar_index, sl, bar_index + 30, sl,
+                 color=color.new(C_SHORT, 25), style=line.style_dashed, width=2)
+        label.new(bar_index + 30, tp, "TP", color=color.new(C_LONG,  10), textcolor=color.white, style=label.style_label_left, size=size.tiny)
+        label.new(bar_index + 30, sl, "SL", color=color.new(C_SHORT, 10), textcolor=color.white, style=label.style_label_left, size=size.tiny)
 
-// Compact triangle shapes for quick visual scanning across timeframes
-plotshape(long_signal  and show_sig, "Long",  shape.triangleup,   location.belowbar, c_long,  size = size.normal)
-plotshape(short_signal and show_sig, "Short", shape.triangledown, location.abovebar, c_short, size = size.normal)
+plotshape(long_signal  and show_sig, "Long",  shape.triangleup,   location.belowbar, C_LONG,  size=size.normal)
+plotshape(short_signal and show_sig, "Short", shape.triangledown, location.abovebar, C_SHORT, size=size.normal)
 
-// Phase status badge — top-right, refreshed every bar
+// ─────────────────────────────────────────────────────────────────────────────
+//  PHASE BADGE  (refreshed every bar, top-right corner)
+// ─────────────────────────────────────────────────────────────────────────────
 var label phase_lbl = na
 label.delete(phase_lbl)
 
@@ -257,24 +262,26 @@ if in_acc
     p_txt := "ACCUMULATION"
     p_col := #FFC107
 else if bull_sweep
-    p_txt := "BULL MANIPULATION"
-    p_col := c_long
+    p_txt := "MANIPULATION ↓"
+    p_col := C_MANIP
 else if bear_sweep
-    p_txt := "BEAR MANIPULATION"
-    p_col := c_short
+    p_txt := "MANIPULATION ↑"
+    p_col := C_MANIP
 else if recent_manip and manip_dir == 1
-    p_txt := "DISTRIBUTION (Bull)"
-    p_col := c_long
+    p_txt := "DISTRIBUTION ↑"
+    p_col := C_LONG
 else if recent_manip and manip_dir == -1
-    p_txt := "DISTRIBUTION (Bear)"
-    p_col := c_short
+    p_txt := "DISTRIBUTION ↓"
+    p_col := C_SHORT
 
-phase_lbl := label.new(bar_index + 3, high + atr * 2, p_txt, color=color.new(p_col, 10), textcolor=color.white, style=label.style_label_left, size=size.small)
+phase_lbl := label.new(bar_index + 2, high + atr * 2, p_txt,
+                        color=color.new(p_col, 10), textcolor=color.white,
+                        style=label.style_label_left, size=size.small)
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  ALERTS
 // ─────────────────────────────────────────────────────────────────────────────
-alertcondition(long_signal,  "AMID — Long Signal",       "AMID: LONG — IFVG + Bull Manipulation confluence detected")
-alertcondition(short_signal, "AMID — Short Signal",      "AMID: SHORT — IFVG + Bear Manipulation confluence detected")
-alertcondition(bull_sweep,   "AMID — Bull Manipulation", "AMID: Bullish liquidity sweep (manipulation) detected")
-alertcondition(bear_sweep,   "AMID — Bear Manipulation", "AMID: Bearish liquidity sweep (manipulation) detected")
+alertcondition(long_signal,  "AMID — Long",        "AMID: LONG signal fired")
+alertcondition(short_signal, "AMID — Short",       "AMID: SHORT signal fired")
+alertcondition(bull_sweep,   "AMID — Bull Sweep",  "AMID: Bullish manipulation sweep")
+alertcondition(bear_sweep,   "AMID — Bear Sweep",  "AMID: Bearish manipulation sweep")

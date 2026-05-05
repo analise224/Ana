@@ -1,5 +1,5 @@
 // This Pine Script® code is subject to the Mozilla Public License 2.0
-// © AMID — Accumulation · Manipulation · IFVG · Distribution  (v3)
+// © AMID — Accumulation · Manipulation · IFVG · Distribution  (v4 — ATR Compression)
 //@version=6
 indicator("AMID — Accumulation · Manipulation · IFVG · Distribution",
           shorttitle="AMID", overlay=true,
@@ -9,21 +9,21 @@ indicator("AMID — Accumulation · Manipulation · IFVG · Distribution",
 //  SETTINGS
 // ─────────────────────────────────────────────────────────────────────────────
 var G1 = "Accumulation"
-acc_atr_mul = input.float(1.5, "Zone Width (× ATR)", minval=0.3, step=0.1, group=G1,
-              tooltip="Max allowed zone width = ATR × this. Raise it if ACCUMULATION never appears.")
-acc_minbars = input.int  (6,   "Min Bars in Zone",   minval=2,   group=G1)
+acc_ratio   = input.float(0.75, "ATR Compression Ratio", minval=0.3, maxval=0.99, step=0.05, group=G1,
+              tooltip="Accumulation fires when ATR(7) < ATR(50) × ratio. Raise toward 0.95 if you never see yellow boxes.")
+acc_minbars = input.int  (5,    "Min Bars in Zone",      minval=2,   group=G1)
 
 var G2 = "Manipulation"
 sw_atr       = input.float(0.3, "Sweep Distance (× ATR)", minval=0.1, step=0.1, group=G2,
-              tooltip="Wick must exceed zone edge by ATR × this.")
-manip_expiry = input.int  (60,  "Manipulation Window (bars)", minval=5, group=G2)
-zone_expiry  = input.int  (50,  "Zone Auto-Expiry (bars)",    minval=5, group=G2,
-              tooltip="Zone is cleared if no sweep happens within this many bars.")
+              tooltip="Wick must pierce beyond zone edge by ATR × this.")
+manip_expiry = input.int  (60,  "Manipulation Window (bars)", minval=5,  group=G2)
+zone_expiry  = input.int  (50,  "Zone Auto-Expiry (bars)",    minval=5,  group=G2,
+              tooltip="Zone clears automatically if no sweep is detected within this many bars.")
 
 var G3 = "IFVG"
-fvg_min_atr = input.float(0.15, "Min Gap Size (× ATR)", minval=0.05, step=0.05, group=G3)
-fvg_width   = input.int  (10,   "Box Width (bars)",     minval=3,    group=G3)
-fvg_max_age = input.int  (60,   "Max Age (bars)",       minval=10,   group=G3)
+fvg_min_atr = input.float(0.15, "Min Gap (× ATR)",  minval=0.05, step=0.05, group=G3)
+fvg_width   = input.int  (10,   "Box Width (bars)", minval=3,    group=G3)
+fvg_max_age = input.int  (60,   "Max Age (bars)",   minval=10,   group=G3)
 
 var G4 = "Signals"
 show_sig = input.bool (true, "Show Entry Labels", group=G4)
@@ -44,67 +44,65 @@ C_LONG     = #00C853
 C_SHORT    = #FF1744
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  USER DEFINED TYPE
+//  UDT
 // ─────────────────────────────────────────────────────────────────────────────
 type FVG
     float top
     float bot
-    int   dir     //  1 = bullish gap,  -1 = bearish gap
+    int   dir
     int   born
     bool  filled
     bool  acted
     box   bx
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  PHASE 1 — ACCUMULATION
+//  PHASE 1 — ACCUMULATION  (ATR compression)
 //
-//  Rolling approach: the zone grows bar by bar.
-//  When ANY new candle pushes the zone wider than ATR × threshold → reset.
-//  This detects tight consolidation without needing a fixed lookback.
+//  Detects consolidation by comparing short-term to long-term ATR.
+//  When recent volatility shrinks to < ratio × baseline volatility the market
+//  is coiling — this works on any asset and timeframe with no per-asset tuning.
 // ─────────────────────────────────────────────────────────────────────────────
-atr = ta.atr(14)
+atr      = ta.atr(14)
+atr_fast = ta.atr(7)
+atr_slow = ta.atr(50)
 
-var float acc_hi      = na      // rolling zone ceiling
-var float acc_lo      = na      // rolling zone floor
-var int   cons_cnt    = 0       // bars inside current zone
-var bool  in_acc      = false
-var int   acc_s       = 0       // bar_index where current zone started
-var bool  prev_in_rng = false   // was previous bar inside a valid zone?
+squeezed = atr_fast < atr_slow * acc_ratio   // volatility compression trigger
 
-// Extend zone by this bar
-new_hi = na(acc_hi) ? high : math.max(acc_hi, high)
-new_lo = na(acc_lo) ? low  : math.min(acc_lo, low)
-in_rng = (new_hi - new_lo) <= atr * acc_atr_mul
+var float acc_hi    = na
+var float acc_lo    = na
+var int   cons_cnt  = 0
+var bool  in_acc    = false
+var int   acc_s     = 0
+var bool  prev_sq   = false
 
-if in_rng
-    if not prev_in_rng
-        // Fresh consolidation start — reset to just this bar
-        acc_s  := bar_index
-        acc_hi := high
-        acc_lo := low
+if squeezed
+    if not prev_sq
+        // First bar of new compression — start zone fresh
+        acc_s    := bar_index
+        acc_hi   := high
+        acc_lo   := low
         cons_cnt := 1
     else
-        acc_hi   := new_hi
-        acc_lo   := new_lo
+        acc_hi   := math.max(acc_hi, high)
+        acc_lo   := math.min(acc_lo, low)
         cons_cnt += 1
     in_acc := cons_cnt >= acc_minbars
 else
-    // Candle broke the zone — reset so next ranging bar starts fresh
     acc_hi   := na
     acc_lo   := na
     cons_cnt := 0
     in_acc   := false
 
-prev_in_rng := in_rng
+prev_sq := squeezed
 
-// ─── Accumulation box — created once, stretched each bar, frozen on breakout ─
+// ─── Accumulation box ────────────────────────────────────────────────────────
 var box   acc_box  = na
-var float zone_hi  = na    // snapshot saved for manipulation detection
+var float zone_hi  = na
 var float zone_lo  = na
-var int   zone_bar = na    // bar when zone was snapshotted
+var int   zone_bar = na
 
 if in_acc[1] and not in_acc
-    // Consolidation just ended — freeze the visual box
+    // Zone just ended — freeze box, save zone for sweep detection
     if not na(acc_box)
         box.set_right(acc_box, bar_index - 1)
     acc_box  := na
@@ -123,7 +121,7 @@ if in_acc
         box.set_top   (acc_box, acc_hi)
         box.set_bottom(acc_box, acc_lo)
 
-// Auto-expire stale zone (compute have_zone AFTER expiry check)
+// Auto-expire zone if no sweep within zone_expiry bars
 if not na(zone_hi) and not na(zone_bar) and bar_index - zone_bar >= zone_expiry
     zone_hi  := na
     zone_lo  := na
@@ -134,8 +132,7 @@ have_zone = not na(zone_hi)
 // ─────────────────────────────────────────────────────────────────────────────
 //  PHASE 2 — MANIPULATION
 //
-//  A candle wicks beyond the zone edge by ≥ sw_atr × ATR and closes back inside.
-//  → orange barcolor + dashed level line + label
+//  Candle wicks beyond zone edge by ≥ sw_atr × ATR then closes back inside.
 // ─────────────────────────────────────────────────────────────────────────────
 bull_sweep = have_zone and low  < zone_lo - atr * sw_atr and close > zone_lo
 bear_sweep = have_zone and high > zone_hi + atr * sw_atr and close < zone_hi
@@ -173,8 +170,7 @@ recent_manip = not na(manip_bar) and bar_index - manip_bar <= manip_expiry
 // ─────────────────────────────────────────────────────────────────────────────
 //  PHASE 3 — IFVG  (Inverse Fair Value Gap)
 //
-//  FVGs are only registered when a manipulation is active → no chart-wide clutter.
-//  Fixed-width boxes; "IFVG" text stamped inside when price fills the zone.
+//  Only registered within the manipulation window → no chart-wide clutter.
 // ─────────────────────────────────────────────────────────────────────────────
 bull_fvg = high[2] < low[0]  and (low[0]  - high[2]) >= atr * fvg_min_atr
 bear_fvg = low[2]  > high[0] and (low[2]  - high[0]) >= atr * fvg_min_atr
@@ -217,11 +213,11 @@ if array.size(fvgs) > 0
             box.set_right       (f.bx, f.born + fvg_width + 5)
 
             if recent_manip and not f.acted
-                // Bear FVG filled after bull sweep → long (FVG now acts as support)
+                // Bearish FVG filled after bull sweep → long (inverted to support)
                 if f.dir == -1 and manip_dir == 1 and close > f.bot
                     long_signal := true
                     f.acted     := true
-                // Bull FVG filled after bear sweep → short (FVG now acts as resistance)
+                // Bullish FVG filled after bear sweep → short (inverted to resistance)
                 if f.dir == 1 and manip_dir == -1 and close < f.top
                     short_signal := true
                     f.acted      := true
@@ -232,7 +228,7 @@ if array.size(fvgs) > 0
         i -= 1
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  PHASE 4 — DISTRIBUTION  (entry + TP / SL)
+//  PHASE 4 — DISTRIBUTION  (entry labels + TP / SL lines)
 // ─────────────────────────────────────────────────────────────────────────────
 if show_sig
     if long_signal
@@ -265,7 +261,7 @@ plotshape(long_signal  and show_sig, "Long",  shape.triangleup,   location.below
 plotshape(short_signal and show_sig, "Short", shape.triangledown, location.abovebar, C_SHORT, size=size.normal)
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  PHASE BADGE
+//  PHASE BADGE + DEBUG INFO
 // ─────────────────────────────────────────────────────────────────────────────
 var label phase_lbl = na
 label.delete(phase_lbl)
@@ -291,7 +287,10 @@ else if have_zone
     p_txt := "WATCHING ZONE"
     p_col := #FFC107
 
-phase_lbl := label.new(bar_index + 2, high + atr * 2, p_txt,
+// Show compression ratio alongside phase so you can tune the threshold
+ratio_str = str.tostring(math.round(atr_fast / atr_slow * 100) / 100)
+phase_lbl := label.new(bar_index + 2, high + atr * 2,
+                        p_txt + "  (" + ratio_str + "/" + str.tostring(acc_ratio) + ")",
                         color=color.new(p_col, 10), textcolor=color.white,
                         style=label.style_label_left, size=size.small)
 

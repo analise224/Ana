@@ -243,17 +243,19 @@ if array.size(fvgs) > 0
         if not f.filled and high >= f.bot and low <= f.top
             f.filled := true
 
-            // Restyle: FVG → IFVG (brighter fill, thicker border, updated label)
+            // Restyle: FVG → IFVG — color shows what the zone NOW acts as after inversion:
+            //   Bull FVG filled → now RESISTANCE → RED
+            //   Bear FVG filled → now SUPPORT    → GREEN
             if f.dir == 1
-                box.set_bgcolor     (f.bx, C_BULL_IFVG)
-                box.set_border_color(f.bx, C_BULL_BRD)
-                box.set_text        (f.bx, "IFVG")
-                box.set_text_color  (f.bx, color.new(#00C853, 0))
-            else
                 box.set_bgcolor     (f.bx, C_BEAR_IFVG)
                 box.set_border_color(f.bx, C_BEAR_BRD)
                 box.set_text        (f.bx, "IFVG")
                 box.set_text_color  (f.bx, color.new(#FF1744, 0))
+            else
+                box.set_bgcolor     (f.bx, C_BULL_IFVG)
+                box.set_border_color(f.bx, C_BULL_BRD)
+                box.set_text        (f.bx, "IFVG")
+                box.set_text_color  (f.bx, color.new(#00C853, 0))
             box.set_border_width(f.bx, 2)
 
             // ── Distribution entry signal ─────────────────────────────────

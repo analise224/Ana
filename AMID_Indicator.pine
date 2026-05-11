@@ -19,8 +19,9 @@ manip_expiry = input.int  (80,  "Signal Window (bars)",        minval=5,    grou
 zone_expiry  = input.int  (60,  "Zone Auto-Expiry (bars)",     minval=5,    group=G2)
 
 var G3 = "FVG / IFVG"
-fvg_show_all = input.bool (true,  "Show All FVGs (not just after manipulation)", group=G3)
-fvg_max_show = input.int  (8,    "Max Visible FVGs",    minval=1, maxval=20, group=G3)
+fvg_show_all = input.bool (false, "Show All FVGs (not just after manipulation)", group=G3,
+              tooltip="OFF = only show FVGs that form after a manipulation sweep (cleaner). ON = show every FVG.")
+fvg_max_show = input.int  (3,    "Max Visible FVGs",    minval=1, maxval=10, group=G3)
 fvg_extend   = input.int  (40,   "Extend Unfilled (bars)",  minval=5,    group=G3)
 fvg_max_age  = input.int  (100,  "Max Age (bars)",           minval=10,   group=G3)
 
@@ -35,12 +36,12 @@ sl_mult  = input.float(1.0,  "SL (× ATR)",         minval=0.1, step=0.1, group=
 C_ACC_BG    = color.new(#FFF9C4, 60)   // pale yellow
 C_ACC_BRD   = color.new(#F9A825,  0)   // amber
 C_MANIP     = #F57C00                  // deep orange
-C_BULL_FVG  = color.new(#26A69A, 78)   // teal (unfilled bull)
-C_BEAR_FVG  = color.new(#EF5350, 78)   // red  (unfilled bear)
-C_BULL_IFVG = color.new(#00C853, 50)   // bright green (IFVG bull = support)
-C_BEAR_IFVG = color.new(#FF1744, 52)   // bright red   (IFVG bear = resistance)
-C_BULL_BRD  = color.new(#00C853, 10)
-C_BEAR_BRD  = color.new(#FF1744, 10)
+C_BULL_FVG  = color.new(#26A69A, 88)   // teal (unfilled bull — very faint, not distracting)
+C_BEAR_FVG  = color.new(#EF5350, 88)   // red  (unfilled bear — very faint)
+C_BULL_IFVG = color.new(#00C853, 65)   // green (IFVG bull — visible but not overpowering)
+C_BEAR_IFVG = color.new(#FF1744, 65)   // red   (IFVG bear — visible but not overpowering)
+C_BULL_BRD  = color.new(#00C853, 20)
+C_BEAR_BRD  = color.new(#FF1744, 20)
 C_LONG      = #00C853
 C_SHORT     = #FF1744
 

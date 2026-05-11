@@ -239,8 +239,10 @@ if array.size(fvgs) > 0
             i -= 1
             continue
 
-        // First touch → IFVG activation
-        if not f.filled and high >= f.bot and low <= f.top
+        // IFVG activation — a candle must CLOSE fully through the FVG (disrespect it):
+        //   Bull FVG: bearish candle closes below the bottom of the gap → now resistance
+        //   Bear FVG: bullish candle closes above the top of the gap  → now support
+        if not f.filled and ((f.dir == 1 and close < f.bot) or (f.dir == -1 and close > f.top))
             f.filled := true
 
             // Restyle: FVG → IFVG — color shows what the zone NOW acts as after inversion:
